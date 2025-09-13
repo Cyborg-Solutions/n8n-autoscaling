@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Monitor Redis Queue - Monitor personalizado das filas
+  redis-monitor:
+    image: redis-monitor:latest
+    build:
+      context: ./monitor
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=minhasenhasegura123
+      - REDIS_DB=0
+      - QUEUE_PATTERN=bull:*
+      - CHECK_INTERVAL=30
+      - LOG_LEVEL=INFO
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # N8N Autoscaler - Autoscaler para Docker Swarm
+  n8n-autoscaler:
+    image: n8n-autoscaler:latest
+    build:
+      context: ./autoscaler
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=minhasenhasegura123
+      - QUEUE_NAME_PREFIX=bull
+      - QUEUE_NAME=jobs
+      - N8N_WORKER_SERVICE_NAME=n8n-worker
+      - MIN_REPLICAS=1
+      - MAX_REPLICAS=10
+      - SCALE_UP_QUEUE_THRESHOLD=20
+      - SCALE_DOWN_QUEUE_THRESHOLD=5
+      - POLLING_INTERVAL_SECONDS=30
+      - COOLDOWN_PERIOD_SECONDS=300
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+
+networks:
+  portainer_network:
+    external: true
