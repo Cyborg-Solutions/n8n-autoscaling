@@ -3,6 +3,8 @@ import time
 import redis
 import docker
 import logging
+import requests
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,7 +31,49 @@ SCALE_DOWN_QUEUE_THRESHOLD = int(os.getenv('SCALE_DOWN_QUEUE_THRESHOLD'))
 POLLING_INTERVAL_SECONDS = int(os.getenv('POLLING_INTERVAL_SECONDS'))
 COOLDOWN_PERIOD_SECONDS = int(os.getenv('COOLDOWN_PERIOD_SECONDS'))
 
+# Configuração de Webhook
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN')
+
 last_scale_time = 0
+
+def send_webhook_notification(action, service_name, old_replicas, new_replicas, queue_length):
+    """Sends a webhook notification when scaling occurs."""
+    if not WEBHOOK_URL or not WEBHOOK_TOKEN:
+        logging.debug("Webhook não configurado. Pulando notificação.")
+        return
+    
+    try:
+        payload = {
+            "action": action,  # "scale_up" ou "scale_down"
+            "service_name": service_name,
+            "old_replicas": old_replicas,
+            "new_replicas": new_replicas,
+            "queue_length": queue_length,
+            "timestamp": time.time()
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {WEBHOOK_TOKEN}"
+        }
+        
+        response = requests.post(
+            WEBHOOK_URL,
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            logging.info(f"Notificação webhook enviada com sucesso para {action}: {old_replicas} -> {new_replicas} réplicas")
+        else:
+            logging.warning(f"Webhook retornou status {response.status_code}: {response.text}")
+            
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Erro ao enviar notificação webhook: {e}")
+    except Exception as e:
+        logging.error(f"Erro inesperado ao enviar webhook: {e}")
 
 def get_redis_connection():
     """Establishes a connection to Redis."""
@@ -172,12 +216,14 @@ def main():
                 new_replicas = min(current_reps + 1, MAX_REPLICAS)
                 logging.info(f"Condição atendida para ESCALAR PARA CIMA. Fila: {queue_len} > {SCALE_UP_QUEUE_THRESHOLD}. Réplicas: {current_reps} < {MAX_REPLICAS}.")
                 if scale_service_swarm(docker_cl, N8N_WORKER_SERVICE_NAME, new_replicas):
+                    send_webhook_notification("scale_up", N8N_WORKER_SERVICE_NAME, current_reps, new_replicas, queue_len)
                     last_scale_time = current_time
                     scaled = True
             elif queue_len < SCALE_DOWN_QUEUE_THRESHOLD and current_reps > MIN_REPLICAS:
                 new_replicas = max(current_reps - 1, MIN_REPLICAS)
                 logging.info(f"Condição atendida para ESCALAR PARA BAIXO. Fila: {queue_len} < {SCALE_DOWN_QUEUE_THRESHOLD}. Réplicas: {current_reps} > {MIN_REPLICAS}.")
                 if scale_service_swarm(docker_cl, N8N_WORKER_SERVICE_NAME, new_replicas):
+                    send_webhook_notification("scale_down", N8N_WORKER_SERVICE_NAME, current_reps, new_replicas, queue_len)
                     last_scale_time = current_time
                     scaled = True
             

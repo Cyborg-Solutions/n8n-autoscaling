@@ -97,6 +97,9 @@ services:
       - SCALE_DOWN_QUEUE_THRESHOLD=5
       - POLLING_INTERVAL_SECONDS=30
       - COOLDOWN_PERIOD_SECONDS=300
+      # Configuração de Webhook (opcional)
+      - WEBHOOK_URL=
+      - WEBHOOK_TOKEN=
       # Usar API HTTP via nome do serviço no Swarm
       - DOCKER_HOST=tcp://docker-api-proxy:2375
     deploy:

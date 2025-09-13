@@ -66,6 +66,30 @@ cp .env.example .env
 nano .env
 ```
 
+### 🔔 Notificações Webhook (Opcional)
+
+O autoscaler suporta notificações webhook que são enviadas sempre que ocorre escalonamento:
+
+```bash
+# Configure no stack YAML ou .env
+WEBHOOK_URL=https://seu-endpoint.com/webhook/autoscaler
+WEBHOOK_TOKEN=seu-token-secreto
+```
+
+**Payload enviado:**
+```json
+{
+  "action": "scale_up",           // "scale_up" ou "scale_down"
+  "service_name": "n8n_n8n_worker",
+  "old_replicas": 2,
+  "new_replicas": 3,
+  "queue_length": 25,
+  "timestamp": 1704067200.123
+}
+```
+
+> 📖 **Documentação completa:** [WEBHOOK-NOTIFICATIONS.md](WEBHOOK-NOTIFICATIONS.md)
+
 ### Deploy no Docker Swarm
 
 #### Opção 1: Stack Standalone (Padrão)
