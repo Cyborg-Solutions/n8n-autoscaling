@@ -4,9 +4,13 @@ FROM python:3.11-alpine
 # Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including build tools for psutil
 RUN apk add --no-cache \
     docker-cli \
+    gcc \
+    python3-dev \
+    musl-dev \
+    linux-headers \
     && rm -rf /var/cache/apk/*
 
 # Copy requirements first to leverage Docker cache
@@ -18,7 +22,7 @@ RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
 # Copy application files
-COPY autoscaler_swarm.py .
+COPY autoscaler.py .
 COPY .env* ./
 
 # Change ownership to non-root user
@@ -42,4 +46,4 @@ ENV REDIS_HOST=redis \
     COOLDOWN_PERIOD_SECONDS=300
 
 # Specify the command to run on container start
-CMD ["python", "-u", "autoscaler_swarm.py"]
+CMD ["python", "-u", "autoscaler.py"]
