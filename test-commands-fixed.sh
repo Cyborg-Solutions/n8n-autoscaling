@@ -9,21 +9,37 @@ echo "❌ Jobs eram adicionados em: bull:jobs:waiting"
 echo "✅ CORREÇÃO: Adicionar jobs na fila correta!"
 echo "==========================================\n"
 
-# Encontrar container Redis
-REDIS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -i redis | head -1)
+# Encontrar container Redis correto
+REDIS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -i redis | grep -v monitor | head -1)
+
+# Se não encontrar, tentar por imagem
+if [ -z "$REDIS_CONTAINER" ]; then
+    REDIS_CONTAINER=$(docker ps --format "{{.Names}}" --filter "ancestor=redis" | head -1)
+fi
+
 echo "📦 Container Redis encontrado: $REDIS_CONTAINER"
 
 if [ -z "$REDIS_CONTAINER" ]; then
     echo "❌ Nenhum container Redis encontrado!"
+    echo "📋 Containers disponíveis:"
+    docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
     exit 1
 fi
 
-# Testar conexão Redis
+# Testar conexão Redis com métodos alternativos
 echo "🔗 Testando conexão com Redis..."
-docker exec "$REDIS_CONTAINER" redis-cli ping
 
-if [ $? -ne 0 ]; then
+# Método 1: Tentar redis-cli
+if docker exec "$REDIS_CONTAINER" redis-cli ping > /dev/null 2>&1; then
+    echo "✅ Redis conectado via redis-cli"
+elif docker exec "$REDIS_CONTAINER" /usr/local/bin/redis-cli ping > /dev/null 2>&1; then
+    echo "✅ Redis conectado via /usr/local/bin/redis-cli"
+elif docker exec "$REDIS_CONTAINER" sh -c "echo 'PING' | nc localhost 6379" 2>/dev/null | grep -q "PONG"; then
+    echo "✅ Redis conectado via netcat"
+else
     echo "❌ Falha na conexão com Redis!"
+    echo "📋 Tentando listar processos no container:"
+    docker exec "$REDIS_CONTAINER" ps aux 2>/dev/null || echo "Não foi possível listar processos"
     exit 1
 fi
 
