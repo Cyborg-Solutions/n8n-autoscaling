@@ -20,24 +20,32 @@ NC='\033[0m' # No Color
 # Função para obter a próxima versão
 get_next_version() {
     local repo=$1
-    echo -e "${BLUE}Verificando última versão de ${repo}...${NC}"
+    echo -e "${BLUE}Verificando última versão de ${repo}...${NC}" >&2
     
     # Obter tags do repositório
-    local tags=$(curl -s "https://registry.hub.docker.com/v2/repositories/${repo}/tags/?page_size=100" | jq -r '.results[].name' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    local response=$(curl -s "https://registry.hub.docker.com/v2/repositories/${repo}/tags/?page_size=100")
     
-    if [ -z "$tags" ]; then
-        echo -e "${YELLOW}Nenhuma versão encontrada. Iniciando com 1.0.0${NC}"
-        echo "1.0.0"
+    # Verificar se a resposta é válida
+    if echo "$response" | jq -e '.results' >/dev/null 2>&1; then
+        local tags=$(echo "$response" | jq -r '.results[].name' 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+        
+        if [ -z "$tags" ]; then
+            echo -e "${YELLOW}Nenhuma versão semântica encontrada. Iniciando com 1.0.0${NC}" >&2
+            echo "1.0.0"
+        else
+            echo -e "${GREEN}Última versão encontrada: ${tags}${NC}" >&2
+            # Incrementar patch version
+            local major=$(echo $tags | cut -d. -f1)
+            local minor=$(echo $tags | cut -d. -f2)
+            local patch=$(echo $tags | cut -d. -f3)
+            local new_patch=$((patch + 1))
+            local new_version="${major}.${minor}.${new_patch}"
+            echo -e "${GREEN}Nova versão: ${new_version}${NC}" >&2
+            echo "$new_version"
+        fi
     else
-        echo -e "${GREEN}Última versão encontrada: ${tags}${NC}"
-        # Incrementar patch version
-        local major=$(echo $tags | cut -d. -f1)
-        local minor=$(echo $tags | cut -d. -f2)
-        local patch=$(echo $tags | cut -d. -f3)
-        local new_patch=$((patch + 1))
-        local new_version="${major}.${minor}.${new_patch}"
-        echo -e "${GREEN}Nova versão: ${new_version}${NC}"
-        echo "$new_version"
+        echo -e "${YELLOW}Repositório não encontrado ou erro na API. Iniciando com 1.0.0${NC}" >&2
+        echo "1.0.0"
     fi
 }
 
