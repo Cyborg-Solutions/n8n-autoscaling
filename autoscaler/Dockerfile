@@ -22,7 +22,7 @@ RUN addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup
 
 # Copy application files
-COPY autoscaler.py .
+COPY autoscaler_swarm.py .
 COPY .env* ./
 
 # Change ownership to non-root user
@@ -46,4 +46,4 @@ ENV REDIS_HOST=redis \
     COOLDOWN_PERIOD_SECONDS=300
 
 # Specify the command to run on container start
-CMD ["python", "-u", "autoscaler.py"]
+CMD ["python", "-u", "autoscaler_swarm.py"]
