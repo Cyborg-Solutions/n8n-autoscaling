@@ -47,14 +47,30 @@ echo "✅ Redis conectado com sucesso!\n"
 
 # Verificar filas existentes
 echo "📊 Verificando filas existentes..."
-docker exec "$REDIS_CONTAINER" redis-cli -n 2 KEYS "bull:jobs:*" | sort
+if docker exec "$REDIS_CONTAINER" redis-cli -n 2 KEYS "bull:jobs:*" 2>/dev/null | sort; then
+    echo ""
+elif docker exec "$REDIS_CONTAINER" /usr/local/bin/redis-cli -n 2 KEYS "bull:jobs:*" 2>/dev/null | sort; then
+    echo ""
+else
+    echo "⚠️  Não foi possível listar filas (redis-cli não disponível)"
+fi
 echo ""
 
-# Função para verificar tamanho da fila correta
+# Function to check queue size with fallback methods
 check_queue_size() {
-    local size=$(docker exec "$REDIS_CONTAINER" redis-cli -n 2 LLEN "bull:jobs:wait")
-    echo "📊 Tamanho atual da fila (bull:jobs:wait): $size jobs"
-    return $size
+    local size
+    
+    # Tentar redis-cli primeiro
+    if size=$(docker exec "$REDIS_CONTAINER" redis-cli -n 2 LLEN "bull:jobs:wait" 2>/dev/null); then
+        echo "📊 Tamanho atual da fila (bull:jobs:wait): $size jobs"
+        return $size
+    elif size=$(docker exec "$REDIS_CONTAINER" /usr/local/bin/redis-cli -n 2 LLEN "bull:jobs:wait" 2>/dev/null); then
+        echo "📊 Tamanho atual da fila (bull:jobs:wait): $size jobs"
+        return $size
+    else
+        echo "⚠️  Não foi possível verificar tamanho da fila (redis-cli não disponível)"
+        return 0
+    fi
 }
 
 # Função para verificar réplicas
@@ -65,14 +81,25 @@ check_replicas() {
     echo "📈 Réplicas configuradas: $replicas"
 }
 
-# Função para adicionar jobs na fila CORRETA
+# Function to add jobs to correct queue with fallback methods
 add_test_jobs_correct() {
     local count=$1
     echo "📈 Adicionando $count jobs de teste na fila CORRETA (bull:jobs:wait)..."
     
+    # Verificar qual método de redis-cli funciona
+    local redis_cmd="redis-cli"
+    if ! docker exec "$REDIS_CONTAINER" redis-cli ping > /dev/null 2>&1; then
+        if docker exec "$REDIS_CONTAINER" /usr/local/bin/redis-cli ping > /dev/null 2>&1; then
+            redis_cmd="/usr/local/bin/redis-cli"
+        else
+            echo "❌ redis-cli não disponível no container. Não é possível adicionar jobs."
+            return 1
+        fi
+    fi
+    
     for i in $(seq 1 $count); do
         # Adicionar na fila que o autoscaler está monitorando
-        docker exec "$REDIS_CONTAINER" redis-cli -n 2 LPUSH "bull:jobs:wait" "{\"id\":\"test-job-$i\",\"data\":{\"test\":true,\"timestamp\":\"$(date -Iseconds)\",\"job_number\":$i}}"
+        docker exec "$REDIS_CONTAINER" $redis_cmd -n 2 LPUSH "bull:jobs:wait" "{\"id\":\"test-job-$i\",\"data\":{\"test\":true,\"timestamp\":\"$(date -Iseconds)\",\"job_number\":$i}}"
         
         if [ $((i % 5)) -eq 0 ]; then
             echo "  ✓ $i jobs adicionados..."
@@ -119,14 +146,17 @@ show_autoscaler_logs
 echo ""
 
 # Teste adicional se ainda não escalou
-current_size=$(docker exec "$REDIS_CONTAINER" redis-cli -n 2 LLEN "bull:jobs:wait")
-if [ "$current_size" -gt 20 ]; then
-    echo "🔄 Fila ainda tem $current_size jobs. Aguardando mais 30 segundos..."
-    sleep 30
-    echo "\n📊 VERIFICAÇÃO FINAL:"
-    check_queue_size
-    check_replicas
-    show_autoscaler_logs
+if current_size=$(docker exec "$REDIS_CONTAINER" redis-cli -n 2 LLEN "bull:jobs:wait" 2>/dev/null) || current_size=$(docker exec "$REDIS_CONTAINER" /usr/local/bin/redis-cli -n 2 LLEN "bull:jobs:wait" 2>/dev/null); then
+    if [ "$current_size" -gt 20 ]; then
+        echo "🔄 Fila ainda tem $current_size jobs. Aguardando mais 30 segundos..."
+        sleep 30
+        echo "\n📊 VERIFICAÇÃO FINAL:"
+        check_queue_size
+        check_replicas
+        show_autoscaler_logs
+    fi
+else
+    echo "⚠️  Não foi possível verificar tamanho final da fila"
 fi
 
 echo "\n✅ Teste corrigido concluído!"
@@ -134,6 +164,7 @@ echo "📝 Para continuar monitorando:"
 echo "   - Logs: docker service logs -f autoscaler-n8n_autoscaler"
 echo "   - Réplicas: watch -n 5 'docker service ls | grep n8n_worker'"
 echo "   - Fila CORRETA: docker exec $REDIS_CONTAINER redis-cli -n 2 LLEN bull:jobs:wait"
+echo "   - Alternativo: docker exec $REDIS_CONTAINER /usr/local/bin/redis-cli -n 2 LLEN bull:jobs:wait"
 echo "\n🎯 DIFERENÇA IMPORTANTE:"
 echo "   ❌ Antes: bull:jobs:waiting (fila errada)"
 echo "   ✅ Agora: bull:jobs:wait (fila que o autoscaler monitora)"
