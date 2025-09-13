@@ -10,8 +10,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=minhasenhasegura123
-      - REDIS_DB=0
+      - REDIS_PASSWORD=
+      - REDIS_DB=2
       - QUEUE_PATTERN=bull:*
       - CHECK_INTERVAL=30
       - LOG_LEVEL=INFO
@@ -38,10 +38,11 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=minhasenhasegura123
+      - REDIS_PASSWORD=
+      - REDIS_DB=2
       - QUEUE_NAME_PREFIX=bull
       - QUEUE_NAME=jobs
-      - N8N_WORKER_SERVICE_NAME=n8n-worker
+      - N8N_WORKER_SERVICE_NAME=n8n_n8n_worker
       - MIN_REPLICAS=1
       - MAX_REPLICAS=10
       - SCALE_UP_QUEUE_THRESHOLD=20
@@ -68,5 +69,6 @@ services:
         max_attempts: 3
 
 networks:
-  portainer_network:
+  CSNet:
     external: true
+    name: CSNet

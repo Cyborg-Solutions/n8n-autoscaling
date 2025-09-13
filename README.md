@@ -52,14 +52,65 @@ docker push seu-usuario/n8n-autoscaler:latest
 
 ## 🚀 Deploy
 
-```bash
-# Deploy da stack
-docker stack deploy -c stack.yaml n8n-monitor
+> 📖 **Para integração com N8N existente:** Consulte o [Guia de Integração N8N](INTEGRACAO-N8N.md)
 
-# Verificar serviços
+### Configuração das Variáveis de Ambiente
+
+Antes do deploy, configure as variáveis no arquivo `.env`:
+
+```bash
+# Copie o arquivo de exemplo
+cp .env.example .env
+
+# Edite as configurações
+nano .env
+```
+
+### Deploy no Docker Swarm
+
+#### Opção 1: Stack Standalone (Padrão)
+
+```bash
+# Deploy da stack completa
+docker stack deploy -c stack.yaml autoscaler
+
+# Verificar status dos serviços
 docker service ls
 
-# Logs dos serviços
-docker service logs n8n-monitor_redis-monitor
-docker service logs n8n-monitor_n8n-autoscaler
+# Ver logs do autoscaler
+docker service logs -f autoscaler_autoscaler
+
+# Ver logs do redis-monitor
+docker service logs -f autoscaler_redis-monitor
 ```
+
+#### Opção 2: Integração com Stack N8N Existente
+
+Se você já possui um stack do N8N rodando com Redis, use o arquivo de integração:
+
+```bash
+# Deploy integrado com N8N existente
+docker stack deploy -c stack-n8n-integration.yaml autoscaler-n8n
+
+# Verificar se os serviços estão na mesma rede
+docker network ls | grep CSNet
+
+# Ver logs do autoscaler integrado
+docker service logs -f autoscaler-n8n_autoscaler
+```
+
+**Configurações importantes para integração:**
+- Redis DB: `2` (mesmo usado pelo N8N)
+- Rede: `CSNet` (rede externa do N8N)
+- Worker Service: `n8n_n8n_worker` (nome do serviço worker do N8N)
+- Sem senha no Redis (conforme configuração do N8N)
+
+**Configuração automática:**
+```bash
+# Script de configuração automática para N8N
+chmod +x configure-n8n-integration.sh
+./configure-n8n-integration.sh
+```
+
+> 📚 **Documentação completa:** [INTEGRACAO-N8N.md](INTEGRACAO-N8N.md)  
+> 🔧 **Resolução de problemas:** [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
