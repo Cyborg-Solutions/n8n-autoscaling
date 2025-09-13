@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 REDIS_HOST = os.getenv('REDIS_HOST')
 REDIS_PORT = int(os.getenv('REDIS_PORT'))
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
+REDIS_DB = int(os.getenv('REDIS_DB', 0))  # Database Redis (padrão 0)
 QUEUE_NAME_PREFIX = os.getenv('QUEUE_NAME_PREFIX')
 QUEUE_NAME = os.getenv('QUEUE_NAME')
 
@@ -32,8 +33,8 @@ last_scale_time = 0
 
 def get_redis_connection():
     """Establishes a connection to Redis."""
-    logging.info(f"Conectando ao Redis em {REDIS_HOST}:{REDIS_PORT}")
-    return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
+    logging.info(f"Conectando ao Redis em {REDIS_HOST}:{REDIS_PORT} (database {REDIS_DB})")
+    return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, db=REDIS_DB, decode_responses=True)
 
 def get_queue_length(r_conn):
     """Gets the length of the specified BullMQ waiting queue."""
