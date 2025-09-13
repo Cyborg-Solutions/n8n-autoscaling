@@ -8,11 +8,20 @@
 .\build-and-push.ps1 -DockerUsername "seu-usuario-dockerhub"
 ```
 
-**Linux/Mac (Bash):**
+**Linux/Mac (Bash com jq):**
 ```bash
+# Requer jq instalado: sudo apt-get install jq
 # Altere 'seu-usuario-dockerhub' no arquivo build-and-push.sh
 chmod +x build-and-push.sh
 ./build-and-push.sh
+```
+
+**Linux/Mac (Bash simplificado - sem jq):**
+```bash
+# Não requer jq, usa versionamento por timestamp
+# Altere 'seu-usuario-dockerhub' no arquivo build-simple.sh
+chmod +x build-simple.sh
+./build-simple.sh
 ```
 
 ### Opção 2: Makefile
