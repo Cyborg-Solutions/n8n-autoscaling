@@ -5,6 +5,9 @@ import docker
 import logging
 import requests
 import json
+import socket
+import platform
+import psutil
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -37,26 +40,113 @@ WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN')
 
 last_scale_time = 0
 
+def get_server_info():
+    """Collect comprehensive server information including system specs and resource usage."""
+    try:
+        # Get basic system information
+        hostname = socket.gethostname()
+        
+        # Get local IP address
+        try:
+            # Connect to a remote address to determine local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "127.0.0.1"
+        
+        # Get platform information
+        system_info = {
+            "system": platform.system(),
+            "release": platform.release(),
+            "version": platform.version(),
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+            "architecture": platform.architecture()[0],
+            "python_version": platform.python_version()
+        }
+        
+        # Get CPU information
+        cpu_percent = psutil.cpu_percent(interval=1)
+        cpu_count = psutil.cpu_count()
+        
+        # Get memory information
+        memory = psutil.virtual_memory()
+        memory_total_gb = round(memory.total / (1024**3), 2)
+        memory_used_gb = round(memory.used / (1024**3), 2)
+        memory_percent = round(memory.percent, 2)
+        
+        # Get disk information
+        disk = psutil.disk_usage('/')
+        disk_total_gb = round(disk.total / (1024**3), 2)
+        disk_used_gb = round(disk.used / (1024**3), 2)
+        disk_percent = round((disk.used / disk.total) * 100, 2)
+        
+        server_info = {
+            "hostname": hostname,
+            "local_ip": local_ip,
+            "platform": f"{system_info['system']} {system_info['release']} ({system_info['architecture']})",
+            "processor": system_info['processor'] or f"{system_info['machine']} processor",
+            "python_version": system_info['python_version'],
+            "cpu_count": cpu_count,
+            "cpu_percent": cpu_percent,
+            "memory_total_gb": memory_total_gb,
+            "memory_used_gb": memory_used_gb,
+            "memory_percent": memory_percent,
+            "disk_total_gb": disk_total_gb,
+            "disk_used_gb": disk_used_gb,
+            "disk_percent": disk_percent
+        }
+        
+        logging.debug(f"Informações do servidor coletadas: {hostname} ({local_ip})")
+        return server_info
+        
+    except Exception as e:
+        logging.error(f"Erro ao coletar informações do servidor: {e}")
+        return {
+            "hostname": "unknown",
+            "local_ip": "unknown",
+            "platform": "unknown",
+            "processor": "unknown",
+            "python_version": "unknown",
+            "cpu_count": 0,
+            "cpu_percent": 0,
+            "memory_total_gb": 0,
+            "memory_used_gb": 0,
+            "memory_percent": 0,
+            "disk_total_gb": 0,
+            "disk_used_gb": 0,
+            "disk_percent": 0
+        }
+
 def send_webhook_notification(action, service_name, old_replicas, new_replicas, queue_length):
     """Sends a webhook notification when scaling occurs."""
-    if not WEBHOOK_URL or not WEBHOOK_TOKEN:
+    if not WEBHOOK_URL:
         logging.debug("Webhook não configurado. Pulando notificação.")
         return
     
     try:
+        # Collect server information
+        server_info = get_server_info()
+        
         payload = {
             "action": action,  # "scale_up" ou "scale_down"
             "service_name": service_name,
             "old_replicas": old_replicas,
             "new_replicas": new_replicas,
             "queue_length": queue_length,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "server_info": server_info
         }
         
         headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {WEBHOOK_TOKEN}"
+            "Content-Type": "application/json"
         }
+        
+        # Add authorization header if token is provided
+        if WEBHOOK_TOKEN:
+            headers["Authorization"] = f"Bearer {WEBHOOK_TOKEN}"
         
         response = requests.post(
             WEBHOOK_URL,

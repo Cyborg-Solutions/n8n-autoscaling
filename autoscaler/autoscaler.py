@@ -159,7 +159,7 @@ def send_webhook_notification(action, service_name, old_replicas, new_replicas, 
 
 def get_redis_connection():
     """Establishes a connection to Redis."""
-    logging.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
+    logging.info(f"Conectando ao Redis em {REDIS_HOST}:{REDIS_PORT}")
     return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
 
 def get_queue_length(r_conn):
@@ -175,30 +175,30 @@ def get_queue_length(r_conn):
         key_to_check_v4 = f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}:waiting"
         length = r_conn.llen(key_to_check_v4)
         if length is not None:
-            logging.info(f"Using BullMQ v4+ key pattern '{key_to_check_v4}' for queue length.")
+            logging.info(f"Usando padrão de chave BullMQ v4+ '{key_to_check_v4}' para comprimento da fila.")
             return length
 
         # Try legacy pattern (sometimes just the queue name for older Bull versions or simple lists)
         key_to_check_legacy = f"{QUEUE_NAME_PREFIX}:{QUEUE_NAME}"
         length = r_conn.llen(key_to_check_legacy)
         if length is not None:
-            logging.info(f"Using legacy key pattern '{key_to_check_legacy}' for queue length.")
+            logging.info(f"Usando padrão de chave legado '{key_to_check_legacy}' para comprimento da fila.")
             return length
         
-        logging.warning(f"Queue key patterns ('{key_to_check}', '{key_to_check_v4}', '{key_to_check_legacy}') not found or not a list. Assuming length 0.")
+        logging.warning(f"Padrões de chave da fila ('{key_to_check}', '{key_to_check_v4}', '{key_to_check_legacy}') não encontrados ou não são listas. Assumindo comprimento 0.")
         return 0
     except redis.exceptions.ResponseError as e:
-        logging.error(f"Redis error when checking length of queue keys: {e}. Assuming length 0.")
+        logging.error(f"Erro do Redis ao verificar comprimento das chaves da fila: {e}. Assumindo comprimento 0.")
         return 0
     except Exception as e:
-        logging.error(f"Unexpected error checking queue length: {e}. Assuming length 0.")
+        logging.error(f"Erro inesperado ao verificar comprimento da fila: {e}. Assumindo comprimento 0.")
         return 0
 
 
 def get_current_replicas(docker_client, service_name, project_name):
     """Gets the current number of running containers for a Docker Compose service."""
     if not project_name:
-        logging.warning("COMPOSE_PROJECT_NAME is not set. Cannot accurately determine current replicas.")
+        logging.warning("COMPOSE_PROJECT_NAME não está definido. Não é possível determinar com precisão as réplicas atuais.")
         # As a fallback, we might try to count containers based on service name label alone,
         # but this is unreliable if multiple projects use the same service name.
         # For now, return a high number to prevent unintended scaling if project name is missing.
@@ -219,17 +219,17 @@ def get_current_replicas(docker_client, service_name, project_name):
         for container in service_containers:
             if container.status == 'running':
                  running_count +=1
-        logging.info(f"Found {running_count} running containers for service '{service_name}' in project '{project_name}'.")
+        logging.info(f"Encontrados {running_count} contêineres em execução para o serviço '{service_name}' no projeto '{project_name}'.")
         return running_count
     except Exception as e:
-        logging.error(f"Error getting current replicas for {service_name} in {project_name}: {e}")
+        logging.error(f"Erro ao obter réplicas atuais para {service_name} no {project_name}: {e}")
         return MAX_REPLICAS + 1 # Return a safe value to prevent scaling on error
 
 
 def scale_service(service_name, replicas, compose_file, project_name):
     """Scales a Docker Compose service using docker-compose CLI."""
     if not project_name:
-        logging.error("COMPOSE_PROJECT_NAME is not set. Cannot execute docker-compose scale.")
+        logging.error("COMPOSE_PROJECT_NAME não está definido. Não é possível executar docker-compose scale.")
         return False
 
     command = [
@@ -244,12 +244,12 @@ def scale_service(service_name, replicas, compose_file, project_name):
         "--scale", f"{service_name}={replicas}",
         service_name
     ]
-    logging.info(f"Executing scaling command: {' '.join(command)}")
+    logging.info(f"Executando comando de escalonamento: {' '.join(command)}")
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
-        logging.info(f"Scale command stdout: {result.stdout.strip()}")
+        logging.info(f"Saída do comando de escalonamento: {result.stdout.strip()}")
         if result.stderr.strip():
-             logging.warning(f"Scale command stderr: {result.stderr.strip()}")
+             logging.warning(f"Erro do comando de escalonamento: {result.stderr.strip()}")
         return True
     except subprocess.CalledProcessError as e:
         logging.error(f"Error scaling service {service_name} to {replicas}:")
