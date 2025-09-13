@@ -2,6 +2,50 @@
 
 Guia para resolução dos problemas mais comuns do autoscaler.
 
+## 🔧 Problemas Comuns e Soluções
+
+### 1. Problemas com Traefik e Resolução de Nomes
+
+**Erro:** `Failed to resolve 'docker-api-proxy'` ou `Name does not resolve`
+
+**Causa:** Conflito entre Traefik e acesso direto ao Docker socket, ou serviços não encontrados na rede.
+
+**Soluções:**
+
+#### Opção 1: Usar Stack Específica para Traefik
+```bash
+# Use a stack otimizada para Traefik
+docker stack deploy -c stack-n8n-integration-traefik.yaml autoscaler-n8n
+
+# Verificar se todos os serviços estão rodando
+docker service ls | grep autoscaler-n8n
+```
+
+#### Opção 2: Verificar Conectividade de Rede
+```bash
+# Verificar se a rede CSNet existe e está ativa
+docker network ls | grep CSNet
+
+# Verificar serviços na rede
+docker network inspect CSNet
+
+# Testar conectividade entre serviços
+docker exec -it $(docker ps -q -f name=autoscaler) ping docker-socket-proxy
+```
+
+#### Opção 3: Recriar a Rede CSNet
+```bash
+# Remover stack temporariamente
+docker stack rm autoscaler-n8n
+
+# Recriar a rede
+docker network rm CSNet
+docker network create --driver overlay --attachable CSNet
+
+# Redeploy da stack
+docker stack deploy -c stack-n8n-integration-traefik.yaml autoscaler-n8n
+```
+
 ## 🚨 Erro: Permission denied no Docker Socket
 
 ### Sintoma

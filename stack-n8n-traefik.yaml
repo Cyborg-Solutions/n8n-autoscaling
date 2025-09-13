@@ -2,7 +2,7 @@ version: "3.7"
 services:
 
 ## --------------------------- DOCKER API PROXY --------------------------- ##
-# Proxy para acessar a API do Docker via HTTP sem socket direto
+# Proxy para acessar a API do Docker via HTTP com Traefik
   docker-api-proxy:
     image: tecnativa/docker-socket-proxy:latest
     networks:
@@ -34,11 +34,18 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 3
+      labels:
+        # Labels para Traefik (caso precise de acesso externo)
+        - "traefik.enable=false"  # Desabilitado por segurança
+        # Se precisar habilitar:
+        # - "traefik.enable=true"
+        # - "traefik.http.routers.docker-api.rule=Host(`docker-api.local`)"
+        # - "traefik.http.services.docker-api.loadbalancer.server.port=2375"
 
 ## --------------------------- REDIS MONITOR --------------------------- ##
 
-  redis-monitor: 
-    image: cyborgsolutionstech/n8n-redis-monitor:1.0.0
+  redis-monitor:
+    image: cyborgsolutionstech/redis-monitor:1.0.0
     networks:
       - CSNet
     environment:
@@ -67,6 +74,8 @@ services:
         delay: 5s
         max_attempts: 3
         window: 120s
+      labels:
+        - "traefik.enable=false"  # Serviço interno
 
 ## --------------------------- AUTOSCALER --------------------------- ##
 
@@ -88,9 +97,8 @@ services:
       - SCALE_DOWN_QUEUE_THRESHOLD=5
       - POLLING_INTERVAL_SECONDS=30
       - COOLDOWN_PERIOD_SECONDS=300
-      # Usar API HTTP ao invés do socket direto
+      # Usar API HTTP via nome do serviço no Swarm
       - DOCKER_HOST=tcp://docker-api-proxy:2375
-    # Sem montagem do socket - usa API HTTP
     deploy:
       mode: replicated
       replicas: 1
@@ -109,6 +117,8 @@ services:
         delay: 10s
         max_attempts: 3
         window: 120s
+      labels:
+        - "traefik.enable=false"  # Serviço interno
 
 ## --------------------------- NETWORKS --------------------------- ##
 
@@ -116,3 +126,5 @@ networks:
   CSNet:
     external: true
     name: CSNet
+    # Certificar que a rede CSNet está configurada com Traefik
+    # docker network create --driver overlay --attachable CSNet

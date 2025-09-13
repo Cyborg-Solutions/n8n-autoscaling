@@ -1,9 +1,9 @@
 version: "3.7"
 services:
 
-## --------------------------- DOCKER API PROXY --------------------------- ##
-# Proxy para acessar a API do Docker via HTTP sem socket direto
-  docker-api-proxy:
+## --------------------------- DOCKER SOCKET PROXY --------------------------- ##
+# Proxy obrigatório para usar com Traefik
+  docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:latest
     networks:
       - CSNet
@@ -34,11 +34,14 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 3
+      labels:
+        # Desabilitar Traefik para este serviço interno
+        - "traefik.enable=false"
 
 ## --------------------------- REDIS MONITOR --------------------------- ##
 
-  redis-monitor: 
-    image: cyborgsolutionstech/n8n-redis-monitor:1.0.0
+  redis-monitor:
+    image: ${DOCKER_USERNAME}/redis-monitor:latest
     networks:
       - CSNet
     environment:
@@ -67,11 +70,14 @@ services:
         delay: 5s
         max_attempts: 3
         window: 120s
+      labels:
+        # Desabilitar Traefik para este serviço interno
+        - "traefik.enable=false"
 
 ## --------------------------- AUTOSCALER --------------------------- ##
 
   autoscaler:
-    image: cyborgsolutionstech/n8n-autoscaler:1.0.0
+    image: ${DOCKER_USERNAME}/autoscaler:latest
     networks:
       - CSNet
     environment:
@@ -88,9 +94,11 @@ services:
       - SCALE_DOWN_QUEUE_THRESHOLD=5
       - POLLING_INTERVAL_SECONDS=30
       - COOLDOWN_PERIOD_SECONDS=300
-      # Usar API HTTP ao invés do socket direto
-      - DOCKER_HOST=tcp://docker-api-proxy:2375
-    # Sem montagem do socket - usa API HTTP
+      # Usar Docker Socket Proxy ao invés do socket direto
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+    # NÃO usar volume do socket direto com Traefik
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock:ro
     deploy:
       mode: replicated
       replicas: 1
@@ -109,6 +117,9 @@ services:
         delay: 10s
         max_attempts: 3
         window: 120s
+      labels:
+        # Desabilitar Traefik para este serviço interno
+        - "traefik.enable=false"
 
 ## --------------------------- NETWORKS --------------------------- ##
 
@@ -116,3 +127,5 @@ networks:
   CSNet:
     external: true
     name: CSNet
+    # Certificar que a rede CSNet está configurada corretamente com Traefik
+    # docker network create --driver overlay --attachable CSNet
