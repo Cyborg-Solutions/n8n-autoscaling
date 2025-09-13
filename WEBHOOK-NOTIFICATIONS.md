@@ -151,6 +151,299 @@ app.post('/webhook/autoscaler', async (req, res) => {
 });
 ```
 
+### 4. Integração com PHP
+
+#### Webhook Simples com PHP
+
+```php
+<?php
+// webhook-autoscaler.php
+
+// Verificar método HTTP
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Método não permitido']);
+    exit;
+}
+
+// Verificar Content-Type
+if (!isset($_SERVER['CONTENT_TYPE']) || $_SERVER['CONTENT_TYPE'] !== 'application/json') {
+    http_response_code(400);
+    echo json_encode(['error' => 'Content-Type deve ser application/json']);
+    exit;
+}
+
+// Verificar token de autenticação
+$headers = getallheaders();
+if (!isset($headers['Authorization'])) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Token de autorização necessário']);
+    exit;
+}
+
+$token = str_replace('Bearer ', '', $headers['Authorization']);
+if ($token !== $_ENV['WEBHOOK_TOKEN']) {
+    http_response_code(401);
+    echo json_encode(['error' => 'Token inválido']);
+    exit;
+}
+
+// Ler payload JSON
+$input = file_get_contents('php://input');
+$data = json_decode($input, true);
+
+if (json_last_error() !== JSON_ERROR_NONE) {
+    http_response_code(400);
+    echo json_encode(['error' => 'JSON inválido']);
+    exit;
+}
+
+// Processar dados do webhook
+$action = $data['action'];
+$serviceName = $data['service_name'];
+$oldReplicas = $data['old_replicas'];
+$newReplicas = $data['new_replicas'];
+$queueLength = $data['queue_length'];
+$timestamp = $data['timestamp'];
+
+// Log da notificação
+error_log("🔄 Escalonamento detectado: {$action} - {$serviceName} ({$oldReplicas} → {$newReplicas})");
+
+// Aqui você pode:
+// - Salvar no banco de dados
+// - Enviar email
+// - Fazer POST para outro endpoint
+// - Atualizar cache/dashboard
+
+// Resposta de sucesso
+http_response_code(200);
+echo json_encode(['status' => 'received', 'timestamp' => time()]);
+?>
+```
+
+#### PHP com Reenvio para Outro Endpoint
+
+```php
+<?php
+// webhook-autoscaler-relay.php
+
+require_once 'vendor/autoload.php'; // Se usar Composer
+
+// ... código de autenticação anterior ...
+
+// Processar dados do webhook
+$webhookData = json_decode(file_get_contents('php://input'), true);
+
+// Preparar payload customizado para reenvio
+$relayPayload = [
+    'event_type' => 'n8n_autoscaler',
+    'action' => $webhookData['action'],
+    'details' => [
+        'service' => $webhookData['service_name'],
+        'scaling' => [
+            'from' => $webhookData['old_replicas'],
+            'to' => $webhookData['new_replicas']
+        ],
+        'queue_size' => $webhookData['queue_length'],
+        'occurred_at' => date('Y-m-d H:i:s', $webhookData['timestamp'])
+    ],
+    'metadata' => [
+        'source' => 'n8n-autoscaler',
+        'environment' => $_ENV['ENVIRONMENT'] ?? 'production',
+        'processed_at' => date('Y-m-d H:i:s')
+    ]
+];
+
+// Função para enviar POST
+function sendWebhookNotification($url, $payload, $token = null) {
+    $ch = curl_init();
+    
+    $headers = [
+        'Content-Type: application/json',
+        'User-Agent: N8N-Autoscaler-Webhook/1.0'
+    ];
+    
+    if ($token) {
+        $headers[] = "Authorization: Bearer {$token}";
+    }
+    
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($payload),
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 3
+    ]);
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+    
+    return [
+        'success' => $httpCode >= 200 && $httpCode < 300,
+        'http_code' => $httpCode,
+        'response' => $response,
+        'error' => $error
+    ];
+}
+
+// Enviar para múltiplos endpoints
+$endpoints = [
+    [
+        'name' => 'Slack Webhook',
+        'url' => $_ENV['SLACK_WEBHOOK_URL'],
+        'token' => null // Slack usa URL com token embutido
+    ],
+    [
+        'name' => 'Sistema de Monitoramento',
+        'url' => $_ENV['MONITORING_WEBHOOK_URL'],
+        'token' => $_ENV['MONITORING_TOKEN']
+    ],
+    [
+        'name' => 'Dashboard Interno',
+        'url' => $_ENV['DASHBOARD_WEBHOOK_URL'],
+        'token' => $_ENV['DASHBOARD_TOKEN']
+    ]
+];
+
+$results = [];
+
+foreach ($endpoints as $endpoint) {
+    if (empty($endpoint['url'])) {
+        continue; // Pular endpoints não configurados
+    }
+    
+    $result = sendWebhookNotification(
+        $endpoint['url'],
+        $relayPayload,
+        $endpoint['token']
+    );
+    
+    $results[$endpoint['name']] = $result;
+    
+    // Log do resultado
+    if ($result['success']) {
+        error_log("✅ Webhook enviado com sucesso para {$endpoint['name']}");
+    } else {
+        error_log("❌ Erro ao enviar webhook para {$endpoint['name']}: {$result['error']} (HTTP {$result['http_code']})");
+    }
+}
+
+// Salvar no banco de dados (opcional)
+try {
+    $pdo = new PDO(
+        "mysql:host={$_ENV['DB_HOST']};dbname={$_ENV['DB_NAME']}",
+        $_ENV['DB_USER'],
+        $_ENV['DB_PASS']
+    );
+    
+    $stmt = $pdo->prepare("
+        INSERT INTO autoscaler_events 
+        (action, service_name, old_replicas, new_replicas, queue_length, occurred_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())
+    ");
+    
+    $stmt->execute([
+        $webhookData['action'],
+        $webhookData['service_name'],
+        $webhookData['old_replicas'],
+        $webhookData['new_replicas'],
+        $webhookData['queue_length'],
+        date('Y-m-d H:i:s', $webhookData['timestamp'])
+    ]);
+    
+    error_log("💾 Evento salvo no banco de dados");
+    
+} catch (PDOException $e) {
+    error_log("❌ Erro ao salvar no banco: " . $e->getMessage());
+}
+
+// Resposta de sucesso
+http_response_code(200);
+echo json_encode([
+    'status' => 'processed',
+    'webhook_results' => $results,
+    'timestamp' => time()
+]);
+?>
+```
+
+#### Configuração do Servidor Web (Apache/Nginx)
+
+**Apache (.htaccess):**
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_METHOD} !^POST$
+RewriteRule ^webhook/autoscaler$ - [R=405,L]
+
+# Redirecionar para o script PHP
+RewriteRule ^webhook/autoscaler$ webhook-autoscaler.php [L]
+```
+
+**Nginx:**
+```nginx
+location /webhook/autoscaler {
+    if ($request_method !~ ^(POST)$) {
+        return 405;
+    }
+    
+    try_files $uri /webhook-autoscaler.php;
+    
+    fastcgi_pass php-fpm;
+    fastcgi_param SCRIPT_FILENAME $document_root/webhook-autoscaler.php;
+    include fastcgi_params;
+}
+```
+
+#### Variáveis de Ambiente PHP
+
+Crie um arquivo `.env` para configuração:
+
+```bash
+# Autenticação
+WEBHOOK_TOKEN=seu-token-secreto-aqui
+
+# Banco de dados
+DB_HOST=localhost
+DB_NAME=monitoring
+DB_USER=webhook_user
+DB_PASS=senha_segura
+
+# Endpoints para reenvio
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+MONITORING_WEBHOOK_URL=https://monitoring.empresa.com/api/webhooks/autoscaler
+MONITORING_TOKEN=token-do-sistema-monitoramento
+DASHBOARD_WEBHOOK_URL=https://dashboard.empresa.com/api/events
+DASHBOARD_TOKEN=token-do-dashboard
+
+# Ambiente
+ENVIRONMENT=production
+```
+
+#### Schema do Banco de Dados (MySQL)
+
+```sql
+CREATE TABLE autoscaler_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    action VARCHAR(20) NOT NULL,
+    service_name VARCHAR(100) NOT NULL,
+    old_replicas INT NOT NULL,
+    new_replicas INT NOT NULL,
+    queue_length INT NOT NULL,
+    occurred_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL,
+    INDEX idx_action (action),
+    INDEX idx_service (service_name),
+    INDEX idx_occurred_at (occurred_at)
+);
+```
+
 ## Configuração Opcional
 
 As notificações webhook são **opcionais**. Se as variáveis `WEBHOOK_URL` e `WEBHOOK_TOKEN` não estiverem configuradas, o autoscaler funcionará normalmente sem enviar notificações.
