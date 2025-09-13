@@ -103,7 +103,7 @@ show_autoscaler_logs
 echo ""
 
 # Teste adicional se ainda não escalou
-local current_size=$(docker exec "$REDIS_CONTAINER" redis-cli -n 2 LLEN "bull:jobs:wait")
+current_size=$(docker exec "$REDIS_CONTAINER" redis-cli -n 2 LLEN "bull:jobs:wait")
 if [ "$current_size" -gt 20 ]; then
     echo "🔄 Fila ainda tem $current_size jobs. Aguardando mais 30 segundos..."
     sleep 30
