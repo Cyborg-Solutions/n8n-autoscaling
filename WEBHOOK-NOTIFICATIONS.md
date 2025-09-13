@@ -374,6 +374,188 @@ echo json_encode([
 ?>
 ```
 
+### Configuração do Servidor Web
+
+#### Apache (.htaccess)
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^webhook$ webhook-autoscaler.php [L]
+```
+
+#### Nginx
+```nginx
+location /webhook {
+    try_files $uri $uri/ /webhook-autoscaler.php;
+}
+```
+
+### Variáveis de Ambiente PHP
+
+```bash
+# .env para PHP
+WEBHOOK_TOKEN=seu_token_secreto_aqui
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+MONITORING_WEBHOOK_URL=https://monitoring.example.com/webhook
+MONITORING_TOKEN=token_do_sistema_monitoramento
+DASHBOARD_WEBHOOK_URL=https://dashboard.example.com/api/events
+DASHBOARD_TOKEN=token_do_dashboard
+DB_HOST=localhost
+DB_NAME=autoscaler_db
+DB_USER=autoscaler_user
+DB_PASS=senha_segura
+ENVIRONMENT=production
+```
+
+### Schema do Banco de Dados MySQL
+
+```sql
+CREATE TABLE autoscaler_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    action VARCHAR(20) NOT NULL,
+    service_name VARCHAR(100) NOT NULL,
+    old_replicas INT NOT NULL,
+    new_replicas INT NOT NULL,
+    queue_length INT NOT NULL,
+    occurred_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_service_name (service_name),
+    INDEX idx_occurred_at (occurred_at),
+    INDEX idx_action (action)
+);
+```
+
+## Integração com Telegram
+
+Exemplo de integração para enviar notificações via Telegram Bot:
+
+```php
+<?php
+// webhook-telegram.php
+
+// Verificar método HTTP
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Método não permitido']);
+    exit;
+}
+
+// Verificar Content-Type
+if (!isset($_SERVER['CONTENT_TYPE']) || $_SERVER['CONTENT_TYPE'] !== 'application/json') {
+    http_response_code(400);
+    echo json_encode(['error' => 'Content-Type deve ser application/json']);
+    exit;
+}
+
+// Ler payload JSON
+$input = file_get_contents('php://input');
+$webhookData = json_decode($input, true);
+
+if (json_last_error() !== JSON_ERROR_NONE) {
+    http_response_code(400);
+    echo json_encode(['error' => 'JSON inválido']);
+    exit;
+}
+
+// Preparar dados da mensagem
+$action = $webhookData['action'];
+$serviceName = $webhookData['service_name'];
+$oldReplicas = $webhookData['old_replicas'];
+$newReplicas = $webhookData['new_replicas'];
+$queueLength = $webhookData['queue_length'];
+$timestamp = date('d/m/Y H:i:s', $webhookData['timestamp']);
+
+// Emoji e texto baseado na ação
+$emoji = $action === 'scale_up' ? '📈' : '📉';
+$actionText = $action === 'scale_up' ? 'Escalonamento para CIMA' : 'Escalonamento para BAIXO';
+
+// Mensagem formatada para Telegram
+$message = "{$emoji} <b>N8N Autoscaler</b>\n\n";
+$message .= "🔄 <b>Ação:</b> {$actionText}\n";
+$message .= "🏷️ <b>Serviço:</b> <code>{$serviceName}</code>\n";
+$message .= "📊 <b>Réplicas:</b> {$oldReplicas} → {$newReplicas}\n";
+$message .= "📋 <b>Fila:</b> {$queueLength} itens\n";
+$message .= "🕐 <b>Horário:</b> {$timestamp}";
+
+// Adicionar contexto baseado no tamanho da fila
+if ($queueLength > 100) {
+    $message .= "\n\n⚠️ <b>Atenção:</b> Fila com alto volume!";
+} elseif ($queueLength === 0 && $action === 'scale_down') {
+    $message .= "\n\n✅ <b>Info:</b> Fila vazia, reduzindo recursos.";
+}
+
+// Configuração direta do Telegram (sem variáveis de ambiente)
+$telegramUrl = 'https://api.telegram.org/bot7944235611:AAHsv9dPWT9JVetgWxD0Ikw9RPjs2fowmZw/sendMessage';
+$telegramData = [
+    'chat_id' => '-1002593719001',
+    'text' => $message,
+    'parse_mode' => 'HTML',
+    'disable_notification' => false
+];
+
+// Enviar POST para Telegram
+$ch = curl_init();
+curl_setopt_array($ch, [
+    CURLOPT_URL => $telegramUrl,
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => json_encode($telegramData),
+    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT => 10,
+    CURLOPT_SSL_VERIFYPEER => true
+]);
+
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$error = curl_error($ch);
+curl_close($ch);
+
+$telegramSuccess = ($httpCode === 200);
+
+if ($telegramSuccess) {
+    error_log("✅ Notificação enviada para Telegram com sucesso");
+} else {
+    error_log("❌ Erro ao enviar para Telegram: {$error} (HTTP {$httpCode})");
+}
+
+// Log da notificação
+error_log("🔄 Escalonamento: {$actionText} - {$serviceName} ({$oldReplicas} → {$newReplicas})");
+
+// Resposta de sucesso
+http_response_code(200);
+echo json_encode([
+    'status' => 'processed',
+    'telegram_sent' => $telegramSuccess,
+    'timestamp' => time()
+]);
+?>
+```
+
+### Teste do Telegram Bot
+
+Para testar se o bot está funcionando:
+
+```bash
+# Teste simples
+curl -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "chat_id": "-1002593719001",
+    "text": "🧪 Teste do N8N Autoscaler Bot",
+    "parse_mode": "HTML"
+  }' \
+  https://api.telegram.org/bot7944235611:AAHsv9dPWT9JVetgWxD0Ikw9RPjs2fowmZw/sendMessage
+```
+
+### Observações
+
+- O token e chat ID estão hardcoded no código para simplicidade
+- Para usar em produção, considere implementar autenticação básica
+- O script processa automaticamente os dados do webhook do autoscaler
+- Logs são gravados no error_log do PHP para debugging
+```
+
 #### Configuração do Servidor Web (Apache/Nginx)
 
 **Apache (.htaccess):**
