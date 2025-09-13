@@ -1,45 +1,45 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9-slim as builder
-
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    curl \
-    jq \
-    docker.io \
-    docker-cli \
-    && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+FROM python:3.11-alpine
 
 # Set the working directory in the container
 WORKDIR /app
 
-# Install Docker Compose v2
-RUN mkdir -p ~/.docker/cli-plugins/ && \
-    curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose && \
-    chmod +x ~/.docker/cli-plugins/docker-compose
+# Install system dependencies
+RUN apk add --no-cache \
+    docker-cli \
+    && rm -rf /var/cache/apk/*
 
 # Copy requirements first to leverage Docker cache
-COPY autoscaler/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Final stage
-FROM python:3.9-slim
-WORKDIR /app
-
-# Copy from builder
-COPY --from=builder /usr/bin/docker /usr/bin/docker
-COPY --from=builder /root/.docker/cli-plugins/ /usr/local/lib/docker/cli-plugins/
-COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
-
-# Ensure docker compose plugin is in PATH
-ENV PATH="/usr/local/lib/docker/cli-plugins:${PATH}"
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
 
 # Copy application files
-COPY autoscaler/autoscaler.py .
-COPY docker-compose.yml .
-COPY Dockerfile .
+COPY autoscaler_swarm.py .
+COPY .env* ./
+
+# Change ownership to non-root user
+RUN chown -R appuser:appgroup /app
+
+# Switch to non-root user
+USER appuser
+
+# Set default environment variables
+ENV REDIS_HOST=redis \
+    REDIS_PORT=6379 \
+    REDIS_PASSWORD= \
+    QUEUE_NAME_PREFIX=bull \
+    QUEUE_NAME=jobs \
+    N8N_WORKER_SERVICE_NAME=n8n-worker \
+    MIN_REPLICAS=1 \
+    MAX_REPLICAS=5 \
+    SCALE_UP_QUEUE_THRESHOLD=10 \
+    SCALE_DOWN_QUEUE_THRESHOLD=2 \
+    POLLING_INTERVAL_SECONDS=30 \
+    COOLDOWN_PERIOD_SECONDS=300
 
 # Specify the command to run on container start
-CMD ["python", "-u", "autoscaler.py"]
+CMD ["python", "-u", "autoscaler_swarm.py"]
