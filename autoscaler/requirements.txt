@@ -2,3 +2,4 @@ redis
 docker
 python-dotenv
 requests
+psutil

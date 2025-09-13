@@ -4,6 +4,11 @@ import redis
 import docker
 import subprocess
 import logging
+import requests
+import json
+import socket
+import platform
+import psutil
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,7 +35,127 @@ SCALE_DOWN_QUEUE_THRESHOLD = int(os.getenv('SCALE_DOWN_QUEUE_THRESHOLD'))
 POLLING_INTERVAL_SECONDS = int(os.getenv('POLLING_INTERVAL_SECONDS'))
 COOLDOWN_PERIOD_SECONDS = int(os.getenv('COOLDOWN_PERIOD_SECONDS'))
 
+# Configuração de Webhook
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+WEBHOOK_TOKEN = os.getenv('WEBHOOK_TOKEN')
+
 last_scale_time = 0
+
+def get_server_info():
+    """Collects server information for webhook notifications."""
+    try:
+        # Basic server information
+        hostname = socket.gethostname()
+        
+        # Try to get local IP address
+        try:
+            # Connect to a remote address to determine local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "unknown"
+        
+        # System information
+        system_info = {
+            "hostname": hostname,
+            "local_ip": local_ip,
+            "platform": platform.platform(),
+            "architecture": platform.architecture()[0],
+            "processor": platform.processor() or "unknown",
+            "python_version": platform.python_version()
+        }
+        
+        # Resource information
+        try:
+            cpu_percent = psutil.cpu_percent(interval=1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            
+            system_info.update({
+                "cpu_percent": round(cpu_percent, 2),
+                "memory_total_gb": round(memory.total / (1024**3), 2),
+                "memory_used_gb": round(memory.used / (1024**3), 2),
+                "memory_percent": round(memory.percent, 2),
+                "disk_total_gb": round(disk.total / (1024**3), 2),
+                "disk_used_gb": round(disk.used / (1024**3), 2),
+                "disk_percent": round((disk.used / disk.total) * 100, 2)
+            })
+        except Exception as e:
+            logging.warning(f"Erro ao coletar informações de recursos: {e}")
+            system_info.update({
+                "cpu_percent": "unknown",
+                "memory_total_gb": "unknown",
+                "memory_used_gb": "unknown",
+                "memory_percent": "unknown",
+                "disk_total_gb": "unknown",
+                "disk_used_gb": "unknown",
+                "disk_percent": "unknown"
+            })
+        
+        return system_info
+        
+    except Exception as e:
+        logging.error(f"Erro ao coletar informações do servidor: {e}")
+        return {
+            "hostname": "unknown",
+            "local_ip": "unknown",
+            "platform": "unknown",
+            "architecture": "unknown",
+            "processor": "unknown",
+            "python_version": "unknown",
+            "cpu_percent": "unknown",
+            "memory_total_gb": "unknown",
+            "memory_used_gb": "unknown",
+            "memory_percent": "unknown",
+            "disk_total_gb": "unknown",
+            "disk_used_gb": "unknown",
+            "disk_percent": "unknown"
+        }
+
+def send_webhook_notification(action, service_name, old_replicas, new_replicas, queue_length):
+    """Sends a webhook notification when scaling occurs with server information."""
+    if not WEBHOOK_URL or not WEBHOOK_TOKEN:
+        logging.debug("Webhook não configurado. Pulando notificação.")
+        return
+    
+    try:
+        # Get server information
+        server_info = get_server_info()
+        
+        payload = {
+            "action": action,  # "scale_up" ou "scale_down"
+            "service_name": service_name,
+            "old_replicas": old_replicas,
+            "new_replicas": new_replicas,
+            "queue_length": queue_length,
+            "timestamp": time.time(),
+            "server_info": server_info
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {WEBHOOK_TOKEN}"
+        }
+        
+        response = requests.post(
+            WEBHOOK_URL,
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            logging.info(f"Notificação webhook enviada com sucesso para {action}: {old_replicas} -> {new_replicas} réplicas")
+            logging.info(f"Servidor: {server_info['hostname']} ({server_info['local_ip']})")
+        else:
+            logging.warning(f"Webhook retornou status {response.status_code}: {response.text}")
+            
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Erro ao enviar notificação webhook: {e}")
+    except Exception as e:
+        logging.error(f"Erro inesperado ao enviar webhook: {e}")
 
 def get_redis_connection():
     """Establishes a connection to Redis."""
@@ -181,12 +306,14 @@ def main():
                 if scale_service(N8N_WORKER_SERVICE_NAME, new_replicas, COMPOSE_FILE_PATH, COMPOSE_PROJECT_NAME):
                     last_scale_time = current_time
                     scaled = True
+                    send_webhook_notification("scale_up", N8N_WORKER_SERVICE_NAME, current_reps, new_replicas, queue_len)
             elif queue_len < SCALE_DOWN_QUEUE_THRESHOLD and current_reps > MIN_REPLICAS:
                 new_replicas = max(current_reps - 1, MIN_REPLICAS) # Scale one by one
                 logging.info(f"Condition met for SCALE DOWN. Queue: {queue_len} < {SCALE_DOWN_QUEUE_THRESHOLD}. Replicas: {current_reps} > {MIN_REPLICAS}.")
                 if scale_service(N8N_WORKER_SERVICE_NAME, new_replicas, COMPOSE_FILE_PATH, COMPOSE_PROJECT_NAME):
                     last_scale_time = current_time
                     scaled = True
+                    send_webhook_notification("scale_down", N8N_WORKER_SERVICE_NAME, current_reps, new_replicas, queue_len)
             
             if not scaled:
                 logging.info("No scaling action needed.")

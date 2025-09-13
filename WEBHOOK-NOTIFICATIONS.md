@@ -39,9 +39,42 @@ Quando um evento de escalonamento ocorre, o autoscaler envia um POST request par
   "old_replicas": 2,              // Número anterior de réplicas
   "new_replicas": 3,              // Novo número de réplicas
   "queue_length": 25,             // Tamanho atual da fila
-  "timestamp": 1704067200.123     // Timestamp Unix da operação
+  "timestamp": 1704067200.123,    // Timestamp Unix da operação
+  "server_info": {                // Informações do servidor autoscaler
+    "hostname": "autoscaler-01",
+    "local_ip": "172.18.0.5",
+    "platform": "Linux-5.4.0-74-generic-x86_64-with-glibc2.31",
+    "architecture": "64bit",
+    "processor": "x86_64",
+    "python_version": "3.9.7",
+    "cpu_percent": 15.2,
+    "memory_total_gb": 8.0,
+    "memory_used_gb": 2.1,
+    "memory_percent": 26.25,
+    "disk_total_gb": 50.0,
+    "disk_used_gb": 12.5,
+    "disk_percent": 25.0
+  }
 }
 ```
+
+### Informações do Servidor
+
+O payload agora inclui informações detalhadas do servidor onde o autoscaler está executando:
+
+- **hostname**: Nome do host do servidor
+- **local_ip**: Endereço IP local do servidor
+- **platform**: Informações da plataforma (SO, versão, arquitetura)
+- **architecture**: Arquitetura do processador (32bit/64bit)
+- **processor**: Tipo do processador
+- **python_version**: Versão do Python em execução
+- **cpu_percent**: Percentual de uso da CPU no momento da notificação
+- **memory_total_gb**: Memória total do sistema em GB
+- **memory_used_gb**: Memória utilizada em GB
+- **memory_percent**: Percentual de uso da memória
+- **disk_total_gb**: Espaço total em disco em GB
+- **disk_used_gb**: Espaço utilizado em disco em GB
+- **disk_percent**: Percentual de uso do disco
 
 ### Headers HTTP
 
@@ -71,19 +104,22 @@ app.use('/webhook/autoscaler', (req, res, next) => {
 
 // Endpoint do webhook
 app.post('/webhook/autoscaler', (req, res) => {
-  const { action, service_name, old_replicas, new_replicas, queue_length } = req.body;
+  const { action, service_name, old_replicas, new_replicas, queue_length, server_info } = req.body;
   
   console.log(`🔄 Escalonamento detectado:`);
   console.log(`   Ação: ${action}`);
   console.log(`   Serviço: ${service_name}`);
   console.log(`   Réplicas: ${old_replicas} → ${new_replicas}`);
   console.log(`   Fila: ${queue_length} jobs`);
+  console.log(`   Servidor: ${server_info.hostname} (${server_info.local_ip})`);
+  console.log(`   CPU: ${server_info.cpu_percent}% | Memória: ${server_info.memory_percent}%`);
   
   // Aqui você pode:
   // - Enviar notificação para Slack/Discord
   // - Salvar no banco de dados
   // - Enviar email
   // - Atualizar dashboard
+  // - Monitorar recursos do servidor
   
   res.status(200).json({ status: 'received' });
 });
@@ -98,7 +134,7 @@ const { WebClient } = require('@slack/web-api');
 const slack = new WebClient(process.env.SLACK_TOKEN);
 
 app.post('/webhook/autoscaler', async (req, res) => {
-  const { action, service_name, old_replicas, new_replicas, queue_length } = req.body;
+  const { action, service_name, old_replicas, new_replicas, queue_length, server_info } = req.body;
   
   const emoji = action === 'scale_up' ? '📈' : '📉';
   const color = action === 'scale_up' ? 'good' : 'warning';
@@ -112,6 +148,9 @@ app.post('/webhook/autoscaler', async (req, res) => {
         { title: 'Serviço', value: service_name, short: true },
         { title: 'Réplicas', value: `${old_replicas} → ${new_replicas}`, short: true },
         { title: 'Fila', value: `${queue_length} jobs`, short: true },
+        { title: 'Servidor', value: `${server_info.hostname} (${server_info.local_ip})`, short: true },
+        { title: 'CPU', value: `${server_info.cpu_percent}%`, short: true },
+        { title: 'Memória', value: `${server_info.memory_percent}%`, short: true },
         { title: 'Timestamp', value: new Date().toLocaleString(), short: true }
       ]
     }]
@@ -128,7 +167,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 app.post('/webhook/autoscaler', async (req, res) => {
-  const { action, service_name, old_replicas, new_replicas, queue_length, timestamp } = req.body;
+  const { action, service_name, old_replicas, new_replicas, queue_length, timestamp, server_info } = req.body;
   
   try {
     await prisma.scalingEvent.create({
@@ -138,7 +177,12 @@ app.post('/webhook/autoscaler', async (req, res) => {
         oldReplicas: old_replicas,
         newReplicas: new_replicas,
         queueLength: queue_length,
-        timestamp: new Date(timestamp * 1000)
+        timestamp: new Date(timestamp * 1000),
+        serverHostname: server_info.hostname,
+        serverIp: server_info.local_ip,
+        serverCpuPercent: server_info.cpu_percent,
+        serverMemoryPercent: server_info.memory_percent,
+        serverDiskPercent: server_info.disk_percent
       }
     });
     
@@ -205,9 +249,11 @@ $oldReplicas = $data['old_replicas'];
 $newReplicas = $data['new_replicas'];
 $queueLength = $data['queue_length'];
 $timestamp = $data['timestamp'];
+$serverInfo = $data['server_info'];
 
 // Log da notificação
 error_log("🔄 Escalonamento detectado: {$action} - {$serviceName} ({$oldReplicas} → {$newReplicas})");
+error_log("📊 Servidor: {$serverInfo['hostname']} ({$serverInfo['local_ip']}) - CPU: {$serverInfo['cpu_percent']}% | Mem: {$serverInfo['memory_percent']}%");
 
 // Aqui você pode:
 // - Salvar no banco de dados
@@ -420,9 +466,20 @@ CREATE TABLE autoscaler_events (
     queue_length INT NOT NULL,
     occurred_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    server_hostname VARCHAR(255),
+    server_ip VARCHAR(45),
+    server_platform TEXT,
+    server_cpu_percent DECIMAL(5,2),
+    server_memory_total_gb DECIMAL(8,2),
+    server_memory_used_gb DECIMAL(8,2),
+    server_memory_percent DECIMAL(5,2),
+    server_disk_total_gb DECIMAL(8,2),
+    server_disk_used_gb DECIMAL(8,2),
+    server_disk_percent DECIMAL(5,2),
     INDEX idx_service_name (service_name),
     INDEX idx_occurred_at (occurred_at),
-    INDEX idx_action (action)
+    INDEX idx_action (action),
+    INDEX idx_server_hostname (server_hostname)
 );
 ```
 
@@ -465,6 +522,7 @@ $oldReplicas = $webhookData['old_replicas'];
 $newReplicas = $webhookData['new_replicas'];
 $queueLength = $webhookData['queue_length'];
 $timestamp = date('d/m/Y H:i:s', $webhookData['timestamp']);
+$serverInfo = $webhookData['server_info'];
 
 // Emoji e texto baseado na ação
 $emoji = $action === 'scale_up' ? '📈' : '📉';
@@ -476,6 +534,8 @@ $message .= "🔄 <b>Ação:</b> {$actionText}\n";
 $message .= "🏷️ <b>Serviço:</b> <code>{$serviceName}</code>\n";
 $message .= "📊 <b>Réplicas:</b> {$oldReplicas} → {$newReplicas}\n";
 $message .= "📋 <b>Fila:</b> {$queueLength} itens\n";
+$message .= "🖥️ <b>Servidor:</b> {$serverInfo['hostname']} ({$serverInfo['local_ip']})\n";
+$message .= "💻 <b>CPU:</b> {$serverInfo['cpu_percent']}% | <b>Mem:</b> {$serverInfo['memory_percent']}%\n";
 $message .= "🕐 <b>Horário:</b> {$timestamp}";
 
 // Adicionar contexto baseado no tamanho da fila
