@@ -1,0 +1,118 @@
+version: "3.7"
+services:
+
+## --------------------------- DOCKER API PROXY --------------------------- ##
+# Proxy para acessar a API do Docker via HTTP sem socket direto
+  docker-api-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    networks:
+      - CSNet
+    environment:
+      - CONTAINERS=1
+      - SERVICES=1
+      - SWARM=1
+      - NODES=1
+      - NETWORKS=1
+      - TASKS=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+## --------------------------- REDIS MONITOR --------------------------- ##
+
+  redis-monitor:
+    image: ${DOCKER_USERNAME}/redis-monitor:latest
+    networks:
+      - CSNet
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=2
+      - QUEUE_PATTERN=bull:*
+      - CHECK_INTERVAL=30
+      - LOG_LEVEL=INFO
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 128M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+## --------------------------- AUTOSCALER --------------------------- ##
+
+  autoscaler:
+    image: ${DOCKER_USERNAME}/autoscaler:latest
+    networks:
+      - CSNet
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=2
+      - QUEUE_NAME_PREFIX=bull
+      - QUEUE_NAME=jobs
+      - N8N_WORKER_SERVICE_NAME=n8n_n8n_worker
+      - MIN_REPLICAS=1
+      - MAX_REPLICAS=10
+      - SCALE_UP_QUEUE_THRESHOLD=20
+      - SCALE_DOWN_QUEUE_THRESHOLD=5
+      - POLLING_INTERVAL_SECONDS=30
+      - COOLDOWN_PERIOD_SECONDS=300
+      # Usar API HTTP ao invés do socket direto
+      - DOCKER_HOST=tcp://docker-api-proxy:2375
+    # Sem montagem do socket - usa API HTTP
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+
+## --------------------------- NETWORKS --------------------------- ##
+
+networks:
+  CSNet:
+    external: true
+    name: CSNet
