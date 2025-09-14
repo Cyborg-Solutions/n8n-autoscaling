@@ -3,3 +3,4 @@ docker
 python-dotenv
 requests
 psutil
+setuptools>=78.1.1
