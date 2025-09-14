@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create docker group and non-root user
-RUN (addgroup -g 999 docker || true) && \
+RUN (getent group docker || addgroup docker) && \
     addgroup -g 1001 -S appgroup && \
     adduser -u 1001 -S appuser -G appgroup && \
     adduser appuser docker
