@@ -17,9 +17,11 @@ RUN apk add --no-cache \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
+# Create docker group and non-root user
+RUN addgroup -g 999 docker && \
+    addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup && \
+    adduser appuser docker
 
 # Copy application files
 COPY autoscaler_swarm.py .
