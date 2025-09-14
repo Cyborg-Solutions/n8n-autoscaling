@@ -1,8 +1,11 @@
 # Use an official Python runtime as a parent image
-FROM python:3.11-alpine
+FROM python:3.11-alpine3.20
 
 # Set the working directory in the container
 WORKDIR /app
+
+# Update package index and upgrade busybox to fix CVE vulnerabilities
+RUN apk update && apk upgrade busybox
 
 # Install system dependencies including build tools for psutil
 RUN apk add --no-cache \
